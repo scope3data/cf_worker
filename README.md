@@ -5,8 +5,10 @@ A Cloudflare Worker that integrates with the Scope3 publisher API to fetch conte
 ## Features
 
 - Proxy mode for accessing content via `/proxy/[URL]` URLs
+- Route handler mode for seamless integration on your domain
 - Segment generation based on page content
 - HTML rewriting to load resources directly from source sites
+- Intelligent caching of origin HTML with change detection
 - Caching of segments to improve performance
 - Automatic handling of protocol-relative URLs
 
@@ -76,7 +78,11 @@ This will run both:
 
 ## Usage
 
-### Proxy Mode
+## Operation Modes
+
+The worker can operate in two different modes:
+
+### 1. Proxy Mode
 
 Access any website through the worker by prepending `/proxy/` to the URL:
 
@@ -89,6 +95,26 @@ The worker will:
 2. Generate or retrieve cached segments for the page
 3. Inject segments as a JavaScript variable (`window.scope3_segments`)
 4. Rewrite URLs to load resources directly from the source
+
+### 2. Route Handler Mode
+
+In this mode, the worker is deployed with Cloudflare routing rules that intercept requests to specific patterns:
+
+```
+# Example in wrangler.toml
+[env.routes.routes]
+pattern = "example.com/*"
+zone_name = "example.com"
+```
+
+When a user visits a page that matches the pattern (e.g., https://example.com/any-page):
+1. Cloudflare routes the request to the worker
+2. The worker fetches the original content from the origin server
+3. Generates or retrieves cached segments for the page
+4. Injects segments as a JavaScript variable (`window.scope3_segments`)
+5. Returns the modified content to the user
+
+This mode is more seamless as it doesn't require changing URLs to access pages.
 
 ### API Mode
 
@@ -114,7 +140,19 @@ Returns JSON with segments:
 Edit `wrangler.toml` to configure:
 
 - `API_TIMEOUT`: Maximum wait time for API (default: 1000ms)
-- `CACHE_TTL`: Cache lifetime in seconds (default: 3600s / 1 hour)
+- `CACHE_TTL`: Cache lifetime for segments in seconds (default: 3600s / 1 hour)
+- `HTML_CACHE_TTL`: Cache lifetime for HTML content in seconds (default: 86400s / 24 hours)
+
+### Intelligent HTML Caching
+
+The worker implements intelligent caching of origin HTML content with change detection:
+
+1. **Initial Request**: When a page is first visited, the content is fetched and cached
+2. **Conditional Requests**: For subsequent requests, the worker uses ETag and Last-Modified headers
+3. **Change Detection**: If the origin reports the content hasn't changed (304 status), the cached version is used
+4. **Automatic Updates**: If the content has changed, the cache is updated with the new version
+
+This system reduces bandwidth and improves performance while ensuring content is always up-to-date.
 
 ## Troubleshooting
 

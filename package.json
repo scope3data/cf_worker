@@ -11,7 +11,10 @@
     "test-resource": "wrangler dev src/test-resource.js --local",
     "api-segments": "wrangler dev src/api-segments.js --local",
     "fixed-api": "wrangler dev src/fixed-api.js --local",
-    "test": "node test/proxy-tests.js && node test/segment-tests.js && node test/api-call-test.js"
+    "test": "node test/proxy-tests.js && node test/segment-tests.js && node test/api-call-test.js",
+    "test:route": "node test/route-handler-test.js",
+    "test:html-cache": "node test/html-cache-test.js",
+    "dev:route": "wrangler dev --env routes"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.50.4"

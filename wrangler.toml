@@ -2,15 +2,21 @@ name = "scope3-segments-worker"
 main = "src/index.js"
 compatibility_date = "2024-05-01"
 
-# KV Namespace for caching
+# KV Namespace for segments caching
 [[kv_namespaces]]
 binding = "SEGMENTS_CACHE"
 id = "ba6f9832bf864df7bf030abe1bf53988"
+
+# KV Namespace for HTML content caching
+[[kv_namespaces]]
+binding = "HTML_CACHE"
+id = "html_cache_placeholder_id"
 
 # Environment variables
 [vars]
 API_TIMEOUT = "200"
 CACHE_TTL = "3600"
+HTML_CACHE_TTL = "86400"  # 24 hours for HTML cache
 
 # Secret environment variables - set these with:
 # npx wrangler secret put SCOPE3_API_KEY
@@ -20,9 +26,32 @@ CACHE_TTL = "3600"
 # Development environment with higher timeouts
 [env.development]
 name = "scope3-segments-worker-dev"
-vars = { API_TIMEOUT = "5000", CACHE_TTL = "3600" }  # 5 seconds timeout, 1 hour cache
+vars = { API_TIMEOUT = "5000", CACHE_TTL = "3600", HTML_CACHE_TTL = "86400" }  # 5 seconds timeout, 1 hour segments cache, 24 hour HTML cache
 
-# Copy KV namespace to development environment
+# Copy KV namespaces to development environment
 [[env.development.kv_namespaces]]
 binding = "SEGMENTS_CACHE"
 id = "ba6f9832bf864df7bf030abe1bf53988"
+
+[[env.development.kv_namespaces]]
+binding = "HTML_CACHE"
+id = "html_cache_placeholder_id"
+
+# Route handler test environment
+[env.routes]
+name = "scope3-segments-worker-routes"
+vars = { API_TIMEOUT = "2000", CACHE_TTL = "3600", HTML_CACHE_TTL = "86400" }  # 2 second timeout, 1 hour segments cache, 24 hour HTML cache
+
+# Copy KV namespaces to routes environment
+[[env.routes.kv_namespaces]]
+binding = "SEGMENTS_CACHE"
+id = "ba6f9832bf864df7bf030abe1bf53988"
+
+[[env.routes.kv_namespaces]]
+binding = "HTML_CACHE"
+id = "html_cache_placeholder_id"
+
+# Routes configuration
+[env.routes.routes]
+pattern = "example.com/*"
+zone_name = "example.com"
