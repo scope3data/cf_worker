@@ -10,7 +10,7 @@ id = "ba6f9832bf864df7bf030abe1bf53988"
 # KV Namespace for HTML content caching
 [[kv_namespaces]]
 binding = "HTML_CACHE"
-id = "html_cache_placeholder_id"
+id = "b63c14d8ca8d46bc94fe4dcff8f76693"
 
 # Environment variables
 [vars]
@@ -35,7 +35,7 @@ id = "ba6f9832bf864df7bf030abe1bf53988"
 
 [[env.development.kv_namespaces]]
 binding = "HTML_CACHE"
-id = "html_cache_placeholder_id"
+id = "01f9fcd9131c4336a276adbfbbb4c01f"
 
 # Route handler test environment
 [env.routes]
@@ -49,7 +49,7 @@ id = "ba6f9832bf864df7bf030abe1bf53988"
 
 [[env.routes.kv_namespaces]]
 binding = "HTML_CACHE"
-id = "html_cache_placeholder_id"
+id = "b63c14d8ca8d46bc94fe4dcff8f76693"
 
 # Routes configuration
 [env.routes.routes]
