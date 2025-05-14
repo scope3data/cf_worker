@@ -27,9 +27,25 @@ async function fetchHtmlWithIntelligentCache(url, originalRequest, env, ctx) {
     if (fetchResult.notModified) cacheStatus += '-CONDITIONAL';
     if (fetchResult.isFallback) cacheStatus += '-FALLBACK';
     
-    // Add cache status to response
+    // Add cache status and validation info to response
     const headers = new Headers(fetchResult.response.headers);
     headers.set('X-HTML-Cache', cacheStatus);
+    
+    // Add validation headers for transparency
+    if (fetchResult.validationInfo) {
+      if (fetchResult.validationInfo.etag) {
+        headers.set('X-Cache-ETag', fetchResult.validationInfo.etag);
+      }
+      if (fetchResult.validationInfo.lastModified) {
+        headers.set('X-Cache-Last-Modified', fetchResult.validationInfo.lastModified);
+      }
+    }
+    
+    // Add cache age if applicable
+    if (fetchResult.fromCache && fetchResult.cacheTimestamp) {
+      const cacheAge = Math.round((Date.now() - fetchResult.cacheTimestamp) / 1000);
+      headers.set('X-Cache-Age', `${cacheAge}s`);
+    }
     
     // Create a new response with the same status, headers, and HTML content
     const response = new Response(fetchResult.html, {

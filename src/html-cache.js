@@ -55,7 +55,13 @@ async function getCachedHtml(url, env) {
     }
     
     console.log(`[HTML-CACHE] Using cached content for ${url} (age: ${Math.round(cacheAge / 1000)}s)`);
-    return cachedData;
+    console.log(`[HTML-CACHE] Cached validation info - ETag: ${cachedData.validation?.etag || 'none'}, Last-Modified: ${cachedData.validation?.lastModified || 'none'}`);
+    
+    // Include cache timestamp in the returned data for header generation
+    return {
+      ...cachedData,
+      cacheTimestamp: cachedData.timestamp
+    };
   } catch (error) {
     console.error(`[HTML-CACHE] Error retrieving cached HTML: ${error}`);
     return null;
@@ -128,12 +134,17 @@ async function fetchHtmlWithConditional(url, cachedData, originalRequest) {
   }
   
   // Add conditional headers if we have cached validation info
+  let conditionalHeadersAdded = false;
   if (cachedData && cachedData.validation) {
     if (cachedData.validation.etag) {
       headers.set('If-None-Match', cachedData.validation.etag);
+      console.log(`[HTML-CACHE] Using ETag: ${cachedData.validation.etag}`);
+      conditionalHeadersAdded = true;
     }
     if (cachedData.validation.lastModified) {
       headers.set('If-Modified-Since', cachedData.validation.lastModified);
+      console.log(`[HTML-CACHE] Using Last-Modified: ${cachedData.validation.lastModified}`);
+      conditionalHeadersAdded = true;
     }
   }
   
@@ -143,31 +154,45 @@ async function fetchHtmlWithConditional(url, cachedData, originalRequest) {
     redirect: 'follow'
   });
   
-  console.log(`[HTML-CACHE] Fetching ${url} ${cachedData ? 'with conditional headers' : ''}`);
+  console.log(`[HTML-CACHE] Fetching ${url} ${conditionalHeadersAdded ? 'with conditional headers' : 'without conditional headers'}`);
   
   try {
     const response = await fetch(fetchRequest);
     
+    // Log response headers
+    console.log(`[HTML-CACHE] Response status: ${response.status}`);
+    console.log(`[HTML-CACHE] Response ETag: ${response.headers.get('etag') || 'none'}`);
+    console.log(`[HTML-CACHE] Response Last-Modified: ${response.headers.get('last-modified') || 'none'}`);
+    
     // Check if the content hasn't changed (304 Not Modified)
     if (response.status === 304 && cachedData) {
-      console.log(`[HTML-CACHE] Content not modified for ${url}`);
+      console.log(`[HTML-CACHE] Content not modified for ${url} - USING CACHE`);
       return {
         html: cachedData.html,
         response: response,
         fromCache: true,
-        notModified: true
+        notModified: true,
+        validationInfo: {
+          etag: cachedData.validation.etag,
+          lastModified: cachedData.validation.lastModified
+        }
       };
     }
     
     // For successful responses, get the HTML
     if (response.ok) {
       const html = await response.text();
+      console.log(`[HTML-CACHE] New content fetched for ${url} (${html.length} bytes)`);
       
       return {
         html: html,
         response: response,
         fromCache: false,
-        notModified: false
+        notModified: false,
+        validationInfo: {
+          etag: response.headers.get('etag'),
+          lastModified: response.headers.get('last-modified')
+        }
       };
     }
     
@@ -183,11 +208,17 @@ async function fetchHtmlWithConditional(url, cachedData, originalRequest) {
         html: cachedData.html,
         response: new Response(cachedData.html, {
           status: 200,
-          headers: { 'Content-Type': 'text/html', 'X-Cache': 'HIT-FALLBACK' }
+          headers: { 
+            'Content-Type': 'text/html', 
+            'X-Cache': 'HIT-FALLBACK',
+            'X-Cache-ETag': cachedData.validation.etag || 'none',
+            'X-Cache-Last-Modified': cachedData.validation.lastModified || 'none'
+          }
         }),
         fromCache: true,
         notModified: false,
-        isFallback: true
+        isFallback: true,
+        validationInfo: cachedData.validation
       };
     }
     
@@ -211,9 +242,16 @@ async function getHtmlWithCache(url, originalRequest, env) {
     // Fetch with conditional request to check for updates
     const fetchResult = await fetchHtmlWithConditional(url, cachedData, originalRequest);
     
+    // Pass along cache timestamp if this is from cache
+    if (fetchResult.fromCache && cachedData && cachedData.cacheTimestamp) {
+      fetchResult.cacheTimestamp = cachedData.cacheTimestamp;
+    }
+    
     // If content is new or changed, cache it
     if (!fetchResult.fromCache && !fetchResult.notModified) {
       await cacheHtml(url, fetchResult.html, fetchResult.response, env);
+      // Set timestamp for newly cached content
+      fetchResult.cacheTimestamp = Date.now();
     }
     
     return fetchResult;

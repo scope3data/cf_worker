@@ -74,6 +74,13 @@ async function testRouteHandlerMode() {
     console.log(`Worker response status: ${workerResponse.status}`);
     console.log(`Worker content length: ${workerContent.length} bytes`);
     
+    // Check cache headers
+    console.log("\nCache Headers:");
+    console.log(`X-HTML-Cache: ${workerResponse.headers.get('X-HTML-Cache') || 'not set'}`);
+    console.log(`X-Cache-ETag: ${workerResponse.headers.get('X-Cache-ETag') || 'not set'}`);
+    console.log(`X-Cache-Last-Modified: ${workerResponse.headers.get('X-Cache-Last-Modified') || 'not set'}`);
+    console.log(`X-Cache-Age: ${workerResponse.headers.get('X-Cache-Age') || 'not set'}`);
+    
     // Check if segments were injected
     const hasSegments = workerContent.includes('window.scope3_segments');
     console.log(`Worker content has segments: ${hasSegments}`);
