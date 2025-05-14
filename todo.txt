@@ -1,0 +1,8 @@
+- Let's push this into a github repo for scope3data and commit an initial
+- Please test route handler mode and make sure it's going to work
+- Let's deploy a version to cloudflare so we can test route handler mode
+- Let's implement intelligent caching of the origin html. can we check to see
+  if it's been updated since the last time we cached it? we will need another
+cloudflare cache instance.
+  version
+

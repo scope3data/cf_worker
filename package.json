@@ -1,0 +1,22 @@
+{
+  "name": "scope3-segments-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that integrates with Scope3 publisher API for ad segments",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev --local-upstream=http://example.com --env development",
+    "deploy": "wrangler deploy",
+    "start": "wrangler dev --local-upstream=http://example.com --env development",
+    "debug": "wrangler dev src/debug.js --local",
+    "test-resource": "wrangler dev src/test-resource.js --local",
+    "api-segments": "wrangler dev src/api-segments.js --local",
+    "fixed-api": "wrangler dev src/fixed-api.js --local",
+    "test": "node test/proxy-tests.js && node test/segment-tests.js && node test/api-call-test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.50.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.15.0"
+  }
+}

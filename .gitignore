@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.dev.vars
+
+# Build outputs
+dist/
+build/
+worker/
+.wrangler/
+
+# Environment files
+.env
+.env.local
+.dev.vars
+
+# Logs and debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+logs/
+*.log
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+**/.claude/settings.local.json

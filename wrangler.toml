@@ -1,0 +1,28 @@
+name = "scope3-segments-worker"
+main = "src/index.js"
+compatibility_date = "2024-05-01"
+
+# KV Namespace for caching
+[[kv_namespaces]]
+binding = "SEGMENTS_CACHE"
+id = "ba6f9832bf864df7bf030abe1bf53988"
+
+# Environment variables
+[vars]
+API_TIMEOUT = "200"
+CACHE_TTL = "3600"
+
+# Secret environment variables - set these with:
+# npx wrangler secret put SCOPE3_API_KEY
+# Note: Secrets are configured in Cloudflare dashboard or via wrangler commands
+# Do not include the [secrets] section in wrangler.toml as it's not officially supported
+
+# Development environment with higher timeouts
+[env.development]
+name = "scope3-segments-worker-dev"
+vars = { API_TIMEOUT = "5000", CACHE_TTL = "3600" }  # 5 seconds timeout, 1 hour cache
+
+# Copy KV namespace to development environment
+[[env.development.kv_namespaces]]
+binding = "SEGMENTS_CACHE"
+id = "ba6f9832bf864df7bf030abe1bf53988"

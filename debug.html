@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Scope3 API Debug Page</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1, h2 { color: #333; }
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 15px;
+      margin-bottom: 15px;
+      background: #f9f9f9;
+    }
+    .section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+    }
+    button {
+      padding: 8px 16px;
+      background-color: #0078d7;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 5px;
+      margin-bottom: 5px;
+    }
+    button:hover {
+      background-color: #0063b1;
+    }
+    button.secondary {
+      background-color: #6c757d;
+    }
+    button.secondary:hover {
+      background-color: #5a6268;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 3px;
+      overflow-x: auto;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+    input {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      width: 100%;
+    }
+    .success {
+      color: #155724;
+      background-color: #d4edda;
+      border: 1px solid #c3e6cb;
+      padding: 10px;
+      border-radius: 3px;
+      margin-bottom: 10px;
+    }
+    .error {
+      color: #721c24;
+      background-color: #f8d7da;
+      border: 1px solid #f5c6cb;
+      padding: 10px;
+      border-radius: 3px;
+      margin-bottom: 10px;
+    }
+    .info {
+      color: #0c5460;
+      background-color: #d1ecf1;
+      border: 1px solid #bee5eb;
+      padding: 10px;
+      border-radius: 3px;
+      margin-bottom: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 15px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+    th {
+      background-color: #f2f2f2;
+    }
+  </style>
+</head>
+<body>
+  <h1>Scope3 API Debug Page</h1>
+  <p>This page helps diagnose URL handling and API issues with the Scope3 Worker.</p>
+  
+  <div class="info">
+    <strong>Page Info:</strong>
+    <br>Current URL: <span id="current-url"></span>
+    <br>Page loaded at: <span id="load-time"></span>
+  </div>
+  
+  <div class="section">
+    <h2>Request Analysis</h2>
+    <p>Use this tool to view detailed information about your requests and how they're handled by the worker.</p>
+    
+    <button id="analyze-btn">Analyze Current Request</button>
+    <button id="analyze-fetch-btn">Analyze with Fetch API</button>
+    
+    <div id="analysis-result" class="card" style="display: none; margin-top: 15px;"></div>
+  </div>
+  
+  <div class="section">
+    <h2>API Segments Test</h2>
+    <p>Test the API segments endpoint with different URL patterns.</p>
+
+    <input type="text" id="segments-url" value="example.com" placeholder="Enter URL to test (e.g., example.com)">
+
+    <div style="margin-bottom: 10px;">
+      <button onclick="testSegmentsApi('relative')">Test with Relative URL</button>
+      <button onclick="testSegmentsApi('absolute')">Test with Absolute URL</button>
+      <button onclick="testSegmentsApi('fetch')">Test with Fetch API</button>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <button onclick="testSegmentsApi('demo')" class="secondary">Test Demo Data</button>
+      <button onclick="testSegmentsApi('example')" class="secondary">Test Example.com</button>
+      <button onclick="testSegmentsApi('empty')" class="secondary">Test Empty URL</button>
+    </div>
+
+    <div style="margin-bottom: 15px;">
+      <button onclick="diagnosticTest()" style="background-color: #28a745;">Run Full Diagnostic Test</button>
+    </div>
+
+    <div id="segments-result" class="card" style="display: none; margin-top: 15px;"></div>
+  </div>
+  
+  <div class="section">
+    <h2>Resource Loading Test</h2>
+    <p>Test loading resources from different paths.</p>
+    
+    <input type="text" id="resource-path" value="/test-resource.json" placeholder="Enter resource path (e.g., /test-resource.json)">
+    
+    <div>
+      <button onclick="loadResource('relative')">Load with Relative Path</button>
+      <button onclick="loadResource('absolute')">Load with Absolute Path</button>
+      <button onclick="loadResource('fetch')">Load with Fetch API</button>
+    </div>
+    
+    <div id="resource-result" class="card" style="display: none; margin-top: 15px;"></div>
+  </div>
+  
+  <div class="section">
+    <h2>Endpoint Reference</h2>
+    <table>
+      <tr>
+        <th>Endpoint</th>
+        <th>Description</th>
+        <th>Test</th>
+      </tr>
+      <tr>
+        <td>/debug-request</td>
+        <td>Shows detailed information about the current request</td>
+        <td><button class="secondary" onclick="openEndpoint('/debug-request')">Try It</button></td>
+      </tr>
+      <tr>
+        <td>/api/segments?url=example</td>
+        <td>Returns demo segments</td>
+        <td><button class="secondary" onclick="openEndpoint('/api/segments?url=example')">Try It</button></td>
+      </tr>
+      <tr>
+        <td>/api/segments?url=https://example.com</td>
+        <td>Returns segments for example.com</td>
+        <td><button class="secondary" onclick="openEndpoint('/api/segments?url=https://example.com')">Try It</button></td>
+      </tr>
+      <tr>
+        <td>/api/example</td>
+        <td>Direct handler for example.com (more reliable)</td>
+        <td><button class="secondary" onclick="openEndpoint('/api/example')">Try It</button></td>
+      </tr>
+      <tr>
+        <td>/test-resource.json</td>
+        <td>Returns a test JSON resource</td>
+        <td><button class="secondary" onclick="openEndpoint('/test-resource.json')">Try It</button></td>
+      </tr>
+      <tr>
+        <td>/page-test-resource.json</td>
+        <td>Returns another test JSON resource</td>
+        <td><button class="secondary" onclick="openEndpoint('/page-test-resource.json')">Try It</button></td>
+      </tr>
+    </table>
+  </div>
+
+  <div class="section">
+    <h2>API Standalone Testing</h2>
+    <p>The API segments handler runs as a standalone worker on the same port.</p>
+    <p>If you're encountering issues with the main worker, switch to using the standalone API worker with:</p>
+    <pre>npm run api-segments</pre>
+
+    <div style="margin-top: 15px;">
+      <button onclick="testStandaloneApi()" style="background-color: #28a745;">Test Standalone API</button>
+    </div>
+
+    <div id="standalone-result" class="card" style="display: none; margin-top: 15px;"></div>
+  </div>
+  
+  <script>
+    // Set page info
+    document.getElementById('current-url').textContent = window.location.href;
+    document.getElementById('load-time').textContent = new Date().toISOString();
+    
+    // Function to show results with proper formatting
+    function showResult(elementId, data, isSuccess = true, message = '') {
+      const resultDiv = document.getElementById(elementId);
+      resultDiv.style.display = 'block';
+      
+      let contentHtml = '';
+      if (message) {
+        contentHtml += `<div class="${isSuccess ? 'success' : 'error'}">${message}</div>`;
+      }
+      
+      if (typeof data === 'object') {
+        contentHtml += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+      } else {
+        contentHtml += `<pre>${data}</pre>`;
+      }
+      
+      resultDiv.innerHTML = contentHtml;
+    }
+    
+    // Analyze current request
+    document.getElementById('analyze-btn').addEventListener('click', function() {
+      // Open in new tab
+      window.open('/debug-request?t=' + Date.now(), '_blank');
+    });
+    
+    // Analyze using fetch
+    document.getElementById('analyze-fetch-btn').addEventListener('click', async function() {
+      try {
+        const response = await fetch('/debug-request?t=' + Date.now(), {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          showResult('analysis-result', data, true, 'Request analysis successful!');
+        } else {
+          showResult('analysis-result', 
+            `Status: ${response.status} ${response.statusText}`, 
+            false, 'Error analyzing request');
+        }
+      } catch (error) {
+        showResult('analysis-result', error.message, false, 'Fetch error');
+        console.error('Fetch error:', error);
+      }
+    });
+    
+    // Test segments API
+    async function testSegmentsApi(mode) {
+      let url = document.getElementById('segments-url').value.trim();
+
+      // Handle preset test cases
+      if (mode === 'demo') {
+        url = 'demo';
+      } else if (mode === 'example') {
+        url = 'example.com';
+      } else if (mode === 'empty') {
+        url = '';
+      }
+
+      // For standard modes, validate URL
+      if ((mode === 'relative' || mode === 'absolute' || mode === 'fetch') && !url) {
+        alert('Please enter a URL to test');
+        return;
+      }
+
+      document.getElementById('segments-result').innerHTML = '<p>Loading...</p>';
+      document.getElementById('segments-result').style.display = 'block';
+
+      if (mode === 'relative' || mode === 'absolute') {
+        // Construct the URL
+        let apiUrl;
+        if (mode === 'relative') {
+          apiUrl = `/api/segments?url=${encodeURIComponent(url)}&t=${Date.now()}`;
+        } else {
+          apiUrl = `${window.location.protocol}//${window.location.host}/api/segments?url=${encodeURIComponent(url)}&t=${Date.now()}`;
+        }
+
+        // Open in new tab
+        window.open(apiUrl, '_blank');
+      } else {
+        // Use fetch API
+        try {
+          const response = await fetch(`/api/segments?url=${encodeURIComponent(url)}&t=${Date.now()}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            showResult('segments-result', data, true, 'Segments loaded successfully!');
+          } else {
+            let errorText = '';
+            try {
+              errorText = await response.text();
+            } catch (e) {
+              errorText = 'Could not read error response';
+            }
+            showResult('segments-result', errorText, false,
+              `Error loading segments (${response.status} ${response.statusText})`);
+          }
+        } catch (error) {
+          showResult('segments-result', error.message, false, 'Fetch error');
+          console.error('Fetch error:', error);
+        }
+      }
+    }
+
+    // Full diagnostic test for API segments
+    async function diagnosticTest() {
+      document.getElementById('segments-result').innerHTML = '<p>Running full diagnostics...</p>';
+      document.getElementById('segments-result').style.display = 'block';
+
+      // Test cases for diagnostics
+      const testCases = [
+        { name: "Example.com", url: "example.com" },
+        { name: "Demo mode", url: "demo" },
+        { name: "Missing URL", url: "" },
+        { name: "Invalid URL format", url: "not-a-url" },
+        { name: "With protocol (HTTP)", url: "http://example.com" },
+        { name: "With protocol (HTTPS)", url: "https://example.com" },
+        { name: "Protocol-relative URL", url: "//example.com" }
+      ];
+
+      const results = [];
+      let allPassed = true;
+
+      for (const testCase of testCases) {
+        try {
+          console.log(`Running test: ${testCase.name} with URL ${testCase.url}`);
+
+          const result = {
+            test: testCase.name,
+            url: testCase.url,
+            passed: false,
+            status: null,
+            data: null,
+            error: null,
+            timeMs: 0
+          };
+
+          const startTime = performance.now();
+
+          // Make the request
+          const response = await fetch(`/api/segments?url=${encodeURIComponent(testCase.url)}&t=${Date.now()}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+
+          result.status = response.status;
+
+          // Check if we got a successful response
+          if (response.status >= 200 && response.status < 300) {
+            try {
+              const data = await response.json();
+              result.data = data;
+              result.passed = true;
+
+              // Check if we got segments in the response
+              if (data.segments && Array.isArray(data.segments)) {
+                result.segmentsCount = data.segments.length;
+              } else {
+                result.passed = false;
+                result.error = "Response did not contain segments array";
+              }
+            } catch (jsonError) {
+              result.passed = false;
+              result.error = `JSON parse error: ${jsonError.message}`;
+            }
+          } else {
+            // Got an error response
+            try {
+              const errorText = await response.text();
+              result.error = `HTTP Error ${response.status}: ${errorText}`;
+            } catch (e) {
+              result.error = `HTTP Error ${response.status}`;
+            }
+          }
+
+          result.timeMs = Math.round(performance.now() - startTime);
+
+          if (!result.passed) {
+            allPassed = false;
+          }
+
+          results.push(result);
+        } catch (error) {
+          results.push({
+            test: testCase.name,
+            url: testCase.url,
+            passed: false,
+            status: null,
+            data: null,
+            error: `Exception: ${error.message}`,
+            timeMs: 0
+          });
+          allPassed = false;
+        }
+      }
+
+      // Show the diagnostic results
+      const summary = {
+        timestamp: new Date().toISOString(),
+        allPassed: allPassed,
+        passed: results.filter(r => r.passed).length,
+        failed: results.filter(r => !r.passed).length,
+        totalTests: results.length,
+        results: results
+      };
+
+      showResult('segments-result', summary, allPassed,
+        allPassed ? 'All diagnostic tests passed!' : 'Some diagnostic tests failed!');
+    }
+    
+    // Load resource
+    async function loadResource(mode) {
+      const path = document.getElementById('resource-path').value.trim();
+      if (!path) {
+        alert('Please enter a resource path');
+        return;
+      }
+      
+      document.getElementById('resource-result').innerHTML = '<p>Loading...</p>';
+      document.getElementById('resource-result').style.display = 'block';
+      
+      // Add timestamp to prevent caching
+      const timestamp = Date.now();
+      const separator = path.includes('?') ? '&' : '?';
+      const resourcePath = `${path}${separator}t=${timestamp}`;
+      
+      if (mode === 'relative' || mode === 'absolute') {
+        // Construct the URL
+        let resourceUrl;
+        if (mode === 'relative') {
+          resourceUrl = resourcePath;
+        } else {
+          resourceUrl = `${window.location.protocol}//${window.location.host}${resourcePath}`;
+        }
+        
+        // Open in new tab
+        window.open(resourceUrl, '_blank');
+      } else {
+        // Use fetch API
+        try {
+          const response = await fetch(resourcePath, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            showResult('resource-result', data, true, 'Resource loaded successfully!');
+          } else {
+            let errorText = '';
+            try {
+              errorText = await response.text();
+            } catch (e) {
+              errorText = 'Could not read error response';
+            }
+            showResult('resource-result', errorText, false, 
+              `Error loading resource (${response.status} ${response.statusText})`);
+          }
+        } catch (error) {
+          showResult('resource-result', error.message, false, 'Fetch error');
+          console.error('Fetch error:', error);
+        }
+      }
+    }
+    
+    // Open endpoint
+    function openEndpoint(path) {
+      const timestamp = Date.now();
+      const separator = path.includes('?') ? '&' : '?';
+      const url = path + separator + 't=' + timestamp;
+      window.open(url, '_blank');
+    }
+
+    // Test standalone API
+    async function testStandaloneApi() {
+      document.getElementById('standalone-result').innerHTML = '<p>Testing standalone API...</p>';
+      document.getElementById('standalone-result').style.display = 'block';
+
+      try {
+        // Make multiple test requests to the standalone API
+        const tests = [
+          fetch('/?t=' + Date.now()),
+          fetch('/?url=example&t=' + Date.now()),
+          fetch('/?url=https://example.com&t=' + Date.now())
+        ];
+
+        const results = await Promise.all(tests);
+        const jsonResults = await Promise.all(results.map(r => r.json()));
+
+        // Show results
+        showResult('standalone-result', {
+          tests: [
+            { url: 'Root endpoint', status: results[0].status, data: jsonResults[0] },
+            { url: 'With example param', status: results[1].status, data: jsonResults[1] },
+            { url: 'With full URL param', status: results[2].status, data: jsonResults[2] }
+          ],
+          timestamp: new Date().toISOString()
+        }, true, 'Standalone API is working!');
+      } catch (error) {
+        showResult('standalone-result', error.message, false, 'Error testing standalone API');
+        console.error('Standalone API test error:', error);
+      }
+    }
+  </script>
+</body>
+</html>
