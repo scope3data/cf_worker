@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# Pre-commit hook to run tests before committing
+# If tests fail, the commit is aborted
+
+# Stash any changes that aren't part of this commit
+echo "Stashing unstaged changes..."
+git stash -q --keep-index
+
+# Run the tests
+echo "Running tests..."
+npm test
+
+# Store the exit code from the tests
+TEST_EXIT_CODE=$?
+
+# Restore the stashed changes
+echo "Restoring unstaged changes..."
+git stash pop -q
+
+# If the tests failed, abort the commit
+if [ $TEST_EXIT_CODE -ne 0 ]; then
+  echo "Tests failed. Commit aborted."
+  exit 1
+fi
+
+# Exit with success code
+exit 0

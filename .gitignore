@@ -31,3 +31,40 @@ Thumbs.db
 *.swp
 *.swo
 **/.claude/settings.local.json
+
+# Testing and development files
+test-*.js
+test-*.html
+!test/index-test.js
+!test/run-test.js
+tmp/
+run-worker.js
+
+# Old source files
+src/*-old.js
+src/*.backup
+src/*-refactored.js
+src/proxy-*.js
+src/html-cache*.js
+src/modules/*
+src/url-fixer.js
+src/debug.js
+src/api-segments.js
+src/fixed-api.js
+src/test-resource.js
+
+# Old test files
+test/*-test.js
+!test/index-test.js
+test/run-all-tests.js
+
+# Deprecated documentation
+HTML_CACHE_*.md
+URL_*.md
+TESTING_*.md
+DEPLOYMENT.md
+github-setup.md
+
+# Local development files
+todo.txt
+setup-hosts.js
