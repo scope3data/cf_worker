@@ -1,22 +1,17 @@
 name = "scope3-segments-worker"
 main = "src/index.js"
-compatibility_date = "2024-05-01"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
 
 # KV Namespace for segments caching
 [[kv_namespaces]]
 binding = "SEGMENTS_CACHE"
 id = "ba6f9832bf864df7bf030abe1bf53988"
 
-# KV Namespace for HTML content caching
-[[kv_namespaces]]
-binding = "HTML_CACHE"
-id = "b63c14d8ca8d46bc94fe4dcff8f76693"
-
 # Environment variables
 [vars]
 API_TIMEOUT = "200"
 CACHE_TTL = "3600"
-HTML_CACHE_TTL = "86400"  # 24 hours for HTML cache
 
 # Secret environment variables - set these with:
 # npx wrangler secret put SCOPE3_API_KEY
@@ -26,32 +21,36 @@ HTML_CACHE_TTL = "86400"  # 24 hours for HTML cache
 # Development environment with higher timeouts
 [env.development]
 name = "scope3-segments-worker-dev"
-vars = { API_TIMEOUT = "5000", CACHE_TTL = "3600", HTML_CACHE_TTL = "86400" }  # 5 seconds timeout, 1 hour segments cache, 24 hour HTML cache
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+[env.development.vars]
+API_TIMEOUT = "5000"
+CACHE_TTL = "3600"
 
 # Copy KV namespaces to development environment
 [[env.development.kv_namespaces]]
 binding = "SEGMENTS_CACHE"
 id = "ba6f9832bf864df7bf030abe1bf53988"
 
-[[env.development.kv_namespaces]]
-binding = "HTML_CACHE"
-id = "01f9fcd9131c4336a276adbfbbb4c01f"
-
 # Route handler test environment
 [env.routes]
 name = "scope3-segments-worker-routes"
-vars = { API_TIMEOUT = "2000", CACHE_TTL = "3600", HTML_CACHE_TTL = "86400" }  # 2 second timeout, 1 hour segments cache, 24 hour HTML cache
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+[env.routes.vars]
+API_TIMEOUT = "2000"
+CACHE_TTL = "3600"
 
 # Copy KV namespaces to routes environment
 [[env.routes.kv_namespaces]]
 binding = "SEGMENTS_CACHE"
 id = "ba6f9832bf864df7bf030abe1bf53988"
 
-[[env.routes.kv_namespaces]]
-binding = "HTML_CACHE"
-id = "b63c14d8ca8d46bc94fe4dcff8f76693"
-
 # Routes configuration
 [env.routes.routes]
 pattern = "example.com/*"
 zone_name = "example.com"
+
+[observability]
+enabled = true
+head_sampling_rate = 1 # optional. default = 1.
