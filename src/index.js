@@ -93,11 +93,11 @@ async function getSegmentsFromAPI(url, etag, last_modified, env) {
       const kvs = data?.url_classifications?.key_vals || [];
       const segments = kvs.length > 0 ? kvs[0].values : []
       await cacheSegments(url, etag, last_modified, segments, env);
+      return segments
     } catch (error) {
       console.error(`[CACHE] Error getting segments: ${error}`);
       return [];
     }
-    return segments
 }
 
 /**
