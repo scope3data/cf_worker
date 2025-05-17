@@ -40,3 +40,7 @@ CACHE_TTL = "3600"
 [[env.routes.kv_namespaces]]
 binding = "SEGMENTS_CACHE"
 id = "ba6f9832bf864df7bf030abe1bf53988"
+
+[observability]
+enabled = true
+head_sampling_rate = 1 # optional. default = 1.
