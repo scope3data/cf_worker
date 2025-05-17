@@ -49,7 +49,11 @@ async function handleRequest(request, env, ctx) {
     return fetch(originRequest);
   }
 
-  var response = await fetch(originRequest)
+  // Start the timer for origin page fetch
+  const originFetchStartTime = Date.now();
+  var response = await fetch(originRequest);
+  const originFetchTime = Date.now() - originFetchStartTime;
+  console.log(`[TIMING] Origin page fetch took ${originFetchTime}ms`);
   const etag = response.headers.get('ETag');
   const lastModified = response.headers.get('Last-Modified');
   const segmentsCacheKey = getCacheKey(url, etag, lastModified)
@@ -72,7 +76,7 @@ async function handleRequest(request, env, ctx) {
 }
 
 async function getSegmentsFromAPI(url, etag, last_modified, env) {
-    // Make Scope3 API request (TODO: add timeout)
+    // Make Scope3 API request with timeout
     const apiKey = env.SCOPE3_API_KEY || config.TEST_API_KEY;
     const scope3req = {
       etag: etag,
@@ -80,22 +84,39 @@ async function getSegmentsFromAPI(url, etag, last_modified, env) {
       url: url.toString()
     }
     try {
+      const apiStartTime = Date.now();
+      
+      // Set up timeout using AbortController
+      const apiTimeout = parseInt(env.API_TIMEOUT || config.DEFAULT_API_TIMEOUT);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), apiTimeout);
+      
       const response = await fetch(config.SCOPE3_API_ENDPOINT, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'x-scope3-auth': `${apiKey}`
         },
-        body: JSON.stringify(scope3req)
-      })
+        body: JSON.stringify(scope3req),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
       const data = await response.json();
+      const apiTime = Date.now() - apiStartTime;
+      console.log(`[TIMING] Scope3 API call took ${apiTime}ms`);
+      
       console.log(`[API] Scope3 API response:`, JSON.stringify(data, null, 2))
       const kvs = data?.url_classifications?.key_vals || [];
-      const segments = kvs.length > 0 ? kvs[0].values : []
+      const segments = kvs.length > 0 ? kvs[0].values : [];
+      
+      // Log segments in a readable format
+      console.log(`[SEGMENTS] Found ${segments.length} segments:`, JSON.stringify(segments, null, 2));
+      
       await cacheSegments(url, etag, last_modified, segments, env);
       return segments
     } catch (error) {
-      console.error(`[CACHE] Error getting segments: ${error}`);
+      console.error(`[API] Error getting segments: ${error}`);
       return [];
     }
 }
@@ -114,8 +135,14 @@ async function getCachedSegments(cacheKey, env) {
       return null;
     }
     
+    // Start timer for cache operation
+    const cacheStartTime = Date.now();
+    
     // Check the KV cache for segments
     const cachedData = await env.SEGMENTS_CACHE.get(cacheKey, { type: 'json' });
+    
+    const cacheTime = Date.now() - cacheStartTime;
+    console.log(`[TIMING] KV cache read took ${cacheTime}ms`);
     
     if (!cachedData) {
       console.log(`[CACHE] No cached segments for key: ${cacheKey}`);
@@ -132,6 +159,7 @@ async function getCachedSegments(cacheKey, env) {
     }
     
     console.log(`[CACHE] Found cached segments for key: ${cacheKey}`);
+    console.log(`[SEGMENTS] Found ${cachedData.segments.length} cached segments:`, JSON.stringify(cachedData.segments, null, 2));
     return cachedData.segments;
   } catch (error) {
     console.error(`[CACHE] Error checking cache: ${error}`);
@@ -164,9 +192,14 @@ async function cacheSegments(url, etag, last_modified, segments, env) {
     // Get cache TTL from environment or use default
     const cacheTtl = parseInt(env.CACHE_TTL || config.DEFAULT_CACHE_TTL);
     
+    // Start timer for cache write operation
+    const cacheWriteStartTime = Date.now();
+    
     // Store in KV with expiration
     await env.SEGMENTS_CACHE.put(cacheKey, JSON.stringify(cacheData), { expirationTtl: cacheTtl });
     
+    const cacheWriteTime = Date.now() - cacheWriteStartTime;
+    console.log(`[TIMING] KV cache write took ${cacheWriteTime}ms`);
     console.log(`[CACHE] Cached segments for key: ${cacheKey} with TTL of ${cacheTtl}s`);
   } catch (error) {
     console.error(`[CACHE] Error caching segments: ${error}`);
@@ -215,7 +248,6 @@ function insertScope3Segments(html, baseUrl, segments) {
     scriptToInject += `<base href=${baseUrl}/>`
   }
 
-  console.log(`writing ${scriptToInject}`)
   return injectIntoHead(html, scriptToInject)
 }
 
