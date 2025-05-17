@@ -51,18 +51,29 @@ async function handleRequest(request, env, ctx) {
 
   // Start the timer for origin page fetch
   const originFetchStartTime = Date.now();
-  var response = await fetch(originRequest);
-  const originFetchTime = Date.now() - originFetchStartTime;
-  console.log(`[TIMING] Origin page fetch took ${originFetchTime}ms`);
-  const etag = response.headers.get('ETag');
-  const lastModified = response.headers.get('Last-Modified');
-  const segmentsCacheKey = getCacheKey(url, etag, lastModified)
-  let segments = await getCachedSegments(segmentsCacheKey, env);
-  if (!segments) {
-    segments = await getSegmentsFromAPI(url, etag, lastModified, env);
-  }
+  try {
+    var response = await fetch(originRequest);
+    const originFetchTime = Date.now() - originFetchStartTime;
+    console.log(`[TIMING] Origin page fetch took ${originFetchTime}ms`);
+    
+    const etag = response.headers.get('ETag');
+    const lastModified = response.headers.get('Last-Modified');
+    const segmentsCacheKey = getCacheKey(url, etag, lastModified);
+    
+    // Get segments from cache
+    let segments = await getCachedSegments(segmentsCacheKey, env);
+    
+    if (!segments) {
+      console.log(`[CACHE] Cache miss, fetching from API`);
+      segments = await getSegmentsFromAPI(url, etag, lastModified, env);
+      // Only cache if we got valid segments
+      if (segments && segments.length > 0) {
+        // Use context.waitUntil to not block the response
+        ctx.waitUntil(cacheSegments(url, etag, lastModified, segments, env));
+      }
+    }
 
-  var html = await response.text()
+  var html = await response.text();
   const modifiedText = insertScope3Segments(html, baseUrl, segments);
   
   // Create a new response that preserves all headers and status
@@ -73,6 +84,13 @@ async function handleRequest(request, env, ctx) {
     statusText: response.statusText,
     headers: headers
   });
+  } catch (error) {
+    console.error(`[FETCH] Error in request processing: ${error}`);
+    return new Response(`Error processing request: ${error.message}`, {
+      status: 500,
+      headers: { 'Content-Type': 'text/plain' }
+    });
+  }
 }
 
 async function getSegmentsFromAPI(url, etag, last_modified, env) {
@@ -113,7 +131,7 @@ async function getSegmentsFromAPI(url, etag, last_modified, env) {
       // Log segments in a readable format
       console.log(`[SEGMENTS] Found ${segments.length} segments:`, JSON.stringify(segments, null, 2));
       
-      await cacheSegments(url, etag, last_modified, segments, env);
+      // No longer caching here since we're doing it in handleRequest
       return segments
     } catch (error) {
       console.error(`[API] Error getting segments: ${error}`);
@@ -122,32 +140,36 @@ async function getSegmentsFromAPI(url, etag, last_modified, env) {
 }
 
 /**
- * Get segments from the KV cache
+ * Get segments from the Cache API
  * @param {string} cacheKey - The key to look up in the cache
  * @param {Object} env - Environment variables and bindings
  * @returns {Promise<Array|null>} - The cached segments or null if not found
  */
 async function getCachedSegments(cacheKey, env) {
   try {
-    // Skip caching if SEGMENTS_CACHE binding is not available
-    if (!env.SEGMENTS_CACHE) {
-      console.log('[CACHE] SEGMENTS_CACHE binding not available, skipping cache');
-      return null;
-    }
-    
     // Start timer for cache operation
     const cacheStartTime = Date.now();
     
-    // Check the KV cache for segments
-    const cachedData = await env.SEGMENTS_CACHE.get(cacheKey, { type: 'json' });
+    // Use the Scope3 API domain as a consistent hostname
+    const apiUrl = new URL(config.SCOPE3_API_ENDPOINT);
+    const cacheUrl = new URL(`https://${apiUrl.hostname}/cache/${encodeURIComponent(cacheKey)}`);
+    const cacheRequest = new Request(cacheUrl);
+    
+    // Access the default cache
+    const cache = caches.default;
+    // No need for a log here, we already logged above
+    const cachedResponse = await cache.match(cacheRequest);
     
     const cacheTime = Date.now() - cacheStartTime;
-    console.log(`[TIMING] KV cache read took ${cacheTime}ms`);
+    console.log(`[TIMING] Cache API read took ${cacheTime}ms`);
     
-    if (!cachedData) {
+    if (!cachedResponse) {
       console.log(`[CACHE] No cached segments for key: ${cacheKey}`);
       return null;
     }
+    
+    // Parse the cached data
+    const cachedData = await cachedResponse.json();
     
     // Check if cache is expired
     const cacheTtl = parseInt(env.CACHE_TTL || config.DEFAULT_CACHE_TTL);
@@ -168,21 +190,17 @@ async function getCachedSegments(cacheKey, env) {
 }
 
 /**
- * Store segments in the KV cache
- * @param {string} cacheKey - The key to store the segments under
+ * Store segments in the Cache API
+ * @param {URL} url - The original URL
+ * @param {string} etag - The ETag header
+ * @param {string} last_modified - The Last-Modified header
  * @param {Array} segments - The segments to cache
  * @param {Object} env - Environment variables and bindings
  * @returns {Promise<void>}
  */
 async function cacheSegments(url, etag, last_modified, segments, env) {
-  const cacheKey = getCacheKey(url, etag, last_modified)
+  const cacheKey = getCacheKey(url, etag, last_modified);
   try {
-    // Skip caching if SEGMENTS_CACHE binding is not available
-    if (!env.SEGMENTS_CACHE) {
-      console.log('[CACHE] SEGMENTS_CACHE binding not available, skipping caching');
-      return;
-    }
-    
     // Create the cache entry
     const cacheData = {
       segments: segments,
@@ -195,11 +213,23 @@ async function cacheSegments(url, etag, last_modified, segments, env) {
     // Start timer for cache write operation
     const cacheWriteStartTime = Date.now();
     
-    // Store in KV with expiration
-    await env.SEGMENTS_CACHE.put(cacheKey, JSON.stringify(cacheData), { expirationTtl: cacheTtl });
+    // Use the Scope3 API domain as a consistent hostname
+    const apiUrl = new URL(config.SCOPE3_API_ENDPOINT);
+    const cacheUrl = new URL(`https://${apiUrl.hostname}/cache/${encodeURIComponent(cacheKey)}`);
+    const cacheRequest = new Request(cacheUrl);
+    const cacheResponse = new Response(JSON.stringify(cacheData), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': `max-age=${cacheTtl}`
+      }
+    });
+    
+    // Store in Cache API
+    const cache = caches.default;
+    await cache.put(cacheRequest, cacheResponse);
     
     const cacheWriteTime = Date.now() - cacheWriteStartTime;
-    console.log(`[TIMING] KV cache write took ${cacheWriteTime}ms`);
+    console.log(`[TIMING] Cache API write took ${cacheWriteTime}ms`);
     console.log(`[CACHE] Cached segments for key: ${cacheKey} with TTL of ${cacheTtl}s`);
   } catch (error) {
     console.error(`[CACHE] Error caching segments: ${error}`);

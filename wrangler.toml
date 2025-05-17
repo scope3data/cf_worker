@@ -3,11 +3,6 @@ main = "src/index.js"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 
-# KV Namespace for segments caching
-[[kv_namespaces]]
-binding = "SEGMENTS_CACHE"
-id = "ba6f9832bf864df7bf030abe1bf53988"
-
 # Environment variables
 [vars]
 API_TIMEOUT = "200"
@@ -22,10 +17,7 @@ compatibility_flags = ["nodejs_compat"]
 API_TIMEOUT = "5000"
 CACHE_TTL = "3600"
 
-# Copy KV namespaces to development environment
-[[env.development.kv_namespaces]]
-binding = "SEGMENTS_CACHE"
-id = "ba6f9832bf864df7bf030abe1bf53988"
+# Using Cache API instead of KV for development environment
 
 # Route handler test environment
 [env.routes]
@@ -36,11 +28,11 @@ compatibility_flags = ["nodejs_compat"]
 API_TIMEOUT = "2000"
 CACHE_TTL = "3600"
 
-# Copy KV namespaces to routes environment
-[[env.routes.kv_namespaces]]
-binding = "SEGMENTS_CACHE"
-id = "ba6f9832bf864df7bf030abe1bf53988"
+# Using Cache API instead of KV for routes environment
 
 [observability]
 enabled = true
 head_sampling_rate = 1 # optional. default = 1.
+
+[placement]
+mode = "smart"

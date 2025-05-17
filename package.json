@@ -5,9 +5,9 @@
   "main": "src/index.js",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --local-upstream=http://example.com --env development",
+    "dev": "wrangler dev --env development",
     "deploy": "wrangler deploy",
-    "start": "wrangler dev --local-upstream=http://example.com --env development",
+    "start": "wrangler dev --env development",
     "test": "node test/run-test.js",
     "dev:route": "wrangler dev --env routes",
     "setup-hooks": "./setup-git-hooks.sh",
@@ -17,6 +17,6 @@
     "@anthropic-ai/sdk": "^0.50.4"
   },
   "devDependencies": {
-    "wrangler": "^4.15.0"
+    "wrangler": "^4.15.2"
   }
 }
