@@ -472,6 +472,22 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
     console.log(`[ID] Found UID2 token: ${uid2Token.substring(0, 10)}...`);
   }
   
+  // Check for ID5 ID (several possible cookie names)
+  const id5Id = cookies['id5id'] || cookies['id5id.1st'] || cookies['ID5ID'] || null;
+  let id5IdParsed = null;
+  
+  if (id5Id) {
+    try {
+      // ID5 ID is usually stored as JSON
+      id5IdParsed = JSON.parse(id5Id);
+      console.log(`[ID] Found ID5 ID: ${JSON.stringify(id5IdParsed)}`);
+    } catch (e) {
+      // Some implementations store it as a plain value
+      console.log(`[ID] Found ID5 ID but couldn't parse as JSON, using as-is: ${id5Id}`);
+      id5IdParsed = { universal_uid: id5Id };
+    }
+  }
+  
   // Create OpenRTB request format
   const openRtbRequest = {
     site: {
@@ -537,6 +553,24 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
         id: uid2Token
       }]
     });
+  }
+  
+  // Add ID5 ID to eids if available
+  if (id5IdParsed) {
+    const universalUid = id5IdParsed.universal_uid || id5IdParsed.ID5ID || id5IdParsed;
+    
+    if (universalUid) {
+      openRtbRequest.user.ext.eids.push({
+        source: "id5-sync.com",
+        uids: [{
+          id: universalUid.toString(),
+          ext: {
+            linkType: id5IdParsed.link_type || id5IdParsed.linkType || 0,
+            abTestingControlGroup: id5IdParsed.ab_testing?.control_group_type || false
+          }
+        }]
+      });
+    }
   }
   
   // Only include user object if we have IDs
