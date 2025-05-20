@@ -72,8 +72,9 @@ async function handleRequest(request, env, ctx) {
     if (!segments) {
       console.log(`[CACHE] Cache miss, fetching from API`);
       segments = await callSegmentApi(apiRequest, env);
-      // Only cache if we got valid segments
-      if (segments && Object.keys(segments).length > 0) {
+      // Only cache if we got valid segments (not null and has at least one non-empty segment)
+      if (segments && Object.keys(segments).length > 0 && 
+          (segments.global.length > 0 || Object.keys(segments).some(key => key !== 'global'))) {
         // Use context.waitUntil to not block the response
         ctx.waitUntil(cacheSegments(cacheKey, segments, env));
       }
@@ -139,10 +140,16 @@ async function callSegmentApi(apiRequest, env) {
     try {
       data = JSON.parse(responseText);
       console.log(`[API] Scope3 API response:`, JSON.stringify(data, null, 2));
+      
+      // Check for API error responses and don't cache them
+      if (data.error) {
+        console.error(`[API] API returned error: ${data.error}`);
+        return null; // Return null to prevent caching
+      }
     } catch (parseError) {
       console.error(`[API] JSON parse error: ${parseError.message}`);
       console.log(`[API] Response body: ${responseText}`);
-      return { global: [] };
+      return null; // Return null to prevent caching
     }
     
     // Handle the new response format - this will need to be adjusted based on the actual response
@@ -174,6 +181,13 @@ async function callSegmentApi(apiRequest, env) {
       });
     }
     
+    // Return empty result if no data was found
+    if (Object.keys(structuredSegments).length === 1 && structuredSegments.global.length === 0) {
+      // We only have the empty global array, no real segments
+      console.log(`[SEGMENTS] No segments found in API response`);
+      return structuredSegments; // We still return this but won't cache it
+    }
+    
     // Log structured segments
     console.log(`[SEGMENTS] Structured segments:`, JSON.stringify(structuredSegments, null, 2));
     
@@ -181,214 +195,12 @@ async function callSegmentApi(apiRequest, env) {
     return structuredSegments;
   } catch (error) {
     console.error(`[API] Error getting segments: ${error}`);
-    // Return empty structured segments object
-    return { global: [] };
+    // Return null to prevent caching
+    return null;
   }
 }
 
-async function getSegmentsFromAPI(url, etag, last_modified, env, request) {
-    // Make Scope3 API request with timeout
-    const apiKey = env.SCOPE3_API_KEY || config.TEST_API_KEY;
-    
-    // Extract domain from the URL
-    const domain = url.hostname;
-    
-    // Get user agent string from request headers
-    const userAgentString = request?.headers?.get("user-agent") || "";
-    
-    // Parse user agent with UAParser
-    const parser = new UAParserLib.UAParser(userAgentString);
-    const result = parser.getResult();
-    
-    // Determine device type from parsing result (1=mobile, 2=desktop, 3=connected TV, 4=phone, 5=tablet, 6=connected device, 7=set top box)
-    let devicetype = 2; // Default to desktop
-    if (result.device.type === 'mobile' || result.device.type === 'tablet') {
-      devicetype = result.device.type === 'mobile' ? 1 : 5;
-    }
-    
-    // Get geolocation data from CF data with defaults
-    let country = "US"; // Default country
-    let region = "";
-    let city = "";
-    let postalCode = "";
-    let latitude = null;
-    let longitude = null;
-    let timezone = "";
-    
-    if (request && request.cf) {
-      // Get country from CF data
-      if (request.cf.country) {
-        country = request.cf.country;
-      }
-      
-      // Get region from CF data
-      if (request.cf.region) {
-        region = request.cf.region;
-      }
-      
-      // Get city from CF data
-      if (request.cf.city) {
-        city = request.cf.city;
-      }
-      
-      // Get postal code from CF data
-      if (request.cf.postalCode) {
-        postalCode = request.cf.postalCode;
-      }
-      
-      // Get coordinates from CF data
-      if (request.cf.latitude !== undefined) {
-        // Ensure latitude is a number
-        latitude = typeof request.cf.latitude === 'number' ? 
-                  request.cf.latitude : 
-                  parseFloat(request.cf.latitude);
-      }
-      if (request.cf.longitude !== undefined) {
-        // Ensure longitude is a number
-        longitude = typeof request.cf.longitude === 'number' ? 
-                   request.cf.longitude : 
-                   parseFloat(request.cf.longitude);
-      }
-      
-      // Get timezone from CF data
-      if (request.cf.timezone) {
-        timezone = request.cf.timezone;
-      }
-    }
-    
-    // Check for CF-Device-Type header
-    const cfDeviceType = request?.headers?.get("CF-Device-Type");
-    if (cfDeviceType) {
-      // Override devicetype based on CF-Device-Type header
-      if (cfDeviceType === "mobile") {
-        devicetype = 1;
-      } else if (cfDeviceType === "tablet") {
-        devicetype = 5;
-      } else if (cfDeviceType === "desktop") {
-        devicetype = 2;
-      }
-    }
-    
-    // Create OpenRTB request format
-    const openRtbRequest = {
-      site: {
-        domain: domain,
-        page: url.toString(),
-        ext: {
-          scope3: {
-            etag: etag || "",
-            last_modified: last_modified || ""
-          }
-        }
-      },
-      imp: [
-        {
-          id: "1"
-        }
-      ],
-      device: {
-        devicetype: devicetype,
-        geo: {
-          country: country
-        },
-        ua: userAgentString,
-        os: result.os.name,
-        make: result.device.vendor || "",
-        model: result.device.model || ""
-      }
-    };
-    
-    // Add optional geo fields only if they have valid values
-    if (region) openRtbRequest.device.geo.region = region;
-    if (city) openRtbRequest.device.geo.city = city;
-    if (postalCode) openRtbRequest.device.geo.zip = postalCode;
-    if (latitude !== null && !isNaN(latitude)) openRtbRequest.device.geo.lat = latitude;
-    if (longitude !== null && !isNaN(longitude)) openRtbRequest.device.geo.lon = longitude;
-    if (timezone) openRtbRequest.device.geo.utcoffset = timezone;
-    
-    try {
-      const apiStartTime = Date.now();
-      
-      // Set up timeout using AbortController
-      const apiTimeout = parseInt(env.API_TIMEOUT || config.DEFAULT_API_TIMEOUT);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), apiTimeout);
-      
-      console.log(`[API] Sending OpenRTB request:`, JSON.stringify(openRtbRequest, null, 2));
-      
-      const response = await fetch(config.SCOPE3_API_ENDPOINT, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-scope3-auth': `${apiKey}`
-        },
-        body: JSON.stringify(openRtbRequest),
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-      const apiTime = Date.now() - apiStartTime;
-      console.log(`[TIMING] Scope3 API call took ${apiTime}ms`);
-      
-      // The response is valid if it's 200 OK, no need to check if (!response.ok)
-      
-      // Get the response text and try to parse it as JSON
-      const responseText = await response.text();
-      
-      // Try to parse the JSON response
-      let data;
-      try {
-        data = JSON.parse(responseText);
-        console.log(`[API] Scope3 API response:`, JSON.stringify(data, null, 2));
-      } catch (parseError) {
-        console.error(`[API] JSON parse error: ${parseError.message}`);
-        console.log(`[API] Response body: ${responseText}`);
-        return [];
-      }
-      
-      // Handle the new response format - this will need to be adjusted based on the actual response
-      let segments = [];
-      
-      // Create structured segments object
-      // TODO: Add global segments when supported by the API
-      const structuredSegments = {
-        global: [] // Empty global segments for now
-      };
-      
-      // Parse slot-specific segments from impressions
-      if (data && data.data && Array.isArray(data.data)) {
-        // Process each destination in the response
-        data.data.forEach(destination => {
-          // Check for imp array
-          if (destination.imp && Array.isArray(destination.imp)) {
-            // Process each impression
-            destination.imp.forEach(impression => {
-              // Extract segments if available
-              if (impression.ext && impression.ext.scope3 && impression.ext.scope3.segments) {
-                const impSegments = impression.ext.scope3.segments.map(segment => segment.id);
-                
-                // Add to slot-specific collection using tagid or imp.id as fallback
-                const slotId = impression.tagid || impression.id;
-                if (slotId) {
-                  structuredSegments[slotId] = impSegments;
-                }
-              }
-            });
-          }
-        });
-      }
-      
-      // Log structured segments
-      console.log(`[SEGMENTS] Structured segments:`, JSON.stringify(structuredSegments, null, 2));
-      
-      // Return the structured segments object
-      return structuredSegments;
-    } catch (error) {
-      console.error(`[API] Error getting segments: ${error}`);
-      // Return empty structured segments object
-      return { global: [] };
-    }
-}
+// This function has been removed as it duplicates the functionality of callSegmentApi
 
 /**
  * Get segments from the Cache API
@@ -674,10 +486,13 @@ function injectIntoHead(html, scriptToInject) {
  * @returns {string} - The modified HTML
  */
 function insertScope3Segments(html, baseUrl, structuredSegments) {
+  // Ensure we have a valid segments object, even if API failed
+  const segments = structuredSegments || { global: [] };
+  
   // Create the script to be injected with structured segments format
   var scriptToInject = `<script>
   window.scope3 = window.scope3 || {};
-  window.scope3.segments = ${JSON.stringify(structuredSegments || { global: [] })};
+  window.scope3.segments = ${JSON.stringify(segments)};
 </script>`;
   if (baseUrl) {
     scriptToInject += `<base href=${baseUrl}/>`
