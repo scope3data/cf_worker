@@ -3,6 +3,7 @@
 
 // Import the worker module directly as ES module
 import * as workerModule from '../src/index.js';
+import { mockApiResponse } from './mock-response.js';
 
 // Mock environment for testing
 const mockEnv = {
@@ -106,6 +107,20 @@ class MockHeaders {
 global.Response = MockResponse;
 global.Headers = MockHeaders;
 
+// Mock Cloudflare's cache
+global.caches = {
+  default: {
+    match: async (request) => {
+      console.log(`[MOCK-CACHE] Cache match for URL: ${request.url}`);
+      return null; // Always cache miss for tests
+    },
+    put: async (request, response) => {
+      console.log(`[MOCK-CACHE] Cache put for URL: ${request.url}`);
+      return null;
+    }
+  }
+};
+
 // Default fetch implementation that tracks calls
 const originalFetch = global.fetch;
 global.fetch = async (req, init) => {
@@ -126,15 +141,26 @@ global.fetch = async (req, init) => {
   // Mock a successful response from the Scope3 API
   if (url.includes('scope3.com')) {
     console.log(`[MOCK-API] Simulating Scope3 API response`);
+    // Create a valid OpenRTB response with global segments for ID=1
+    const mockSegments = ["api_segment_1", "api_segment_2", "test_content"];
+    const segmentObjects = mockSegments.map(id => ({ id }));
+    
     return new MockResponse(JSON.stringify({
-      url_classifications: {
-        key_vals: [
-          {
-            key: 'scope3_segs',
-            values: ['api_segment_1', 'api_segment_2', 'test_content']
-          }
-        ]
-      }
+      data: [
+        {
+          destination: "triplelift.com",
+          imp: [
+            {
+              id: "1",
+              ext: {
+                scope3: {
+                  segments: segmentObjects
+                }
+              }
+            }
+          ]
+        }
+      ]
     }), {
       headers: { 'content-type': 'application/json' },
       status: 200
@@ -284,12 +310,15 @@ const testCases = [
       const body = await response.text();
       const hasApiSegments = body.includes('"api_segment_1"') && 
                             body.includes('"api_segment_2"');
+      const hasStructuredFormat = body.includes('"global":') || 
+                                 body.includes('"1":');
       
       return {
-        pass: response.status === 200 && hasApiSegments,
+        pass: response.status === 200 && hasApiSegments && hasStructuredFormat,
         details: {
           hasApiSegments,
-          segmentMatch: body.match(/window\.scope3\s*=\s*window\.scope3\s*\|\|\s*{};[\s\S]*?window\.scope3\.segments\s*=\s*(\[.*?\]);/)?.[1] || 'No segments found'
+          hasStructuredFormat,
+          segmentMatch: body.match(/window\.scope3\s*=\s*window\.scope3\s*\|\|\s*{};[\s\S]*?window\.scope3\.segments\s*=\s*({.*?});/)?.[1] || 'No segments found'
         }
       };
     }
@@ -318,7 +347,10 @@ const testCases = [
           apiCall.method === 'POST' && 
           apiCall.headers['Content-Type'] === 'application/json' &&
           apiCall.headers['x-scope3-auth'] === 'test-key' &&
-          apiBody.url,
+          apiBody.site &&
+          apiBody.site.page && 
+          apiBody.imp && 
+          Array.isArray(apiBody.imp),
         details: {
           apiCall,
           apiBody
@@ -333,12 +365,15 @@ const testCases = [
       const body = await response.text();
       const hasSegments = body.includes('window.scope3.segments');
       const hasApiSegments = body.includes('"api_segment_1"');
+      const hasStructuredFormat = body.includes('"global":') || 
+                               body.includes('"1":');
       
       return {
-        pass: response.status === 200 && hasSegments && hasApiSegments,
+        pass: response.status === 200 && hasSegments && hasApiSegments && hasStructuredFormat,
         details: {
           hasSegments,
           hasApiSegments,
+          hasStructuredFormat,
           bodyPreview: body.substring(0, 100) + '...'
         }
       };

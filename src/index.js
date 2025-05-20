@@ -7,6 +7,7 @@
 
 // Import configuration and simplified caching modules (ES module format)
 import * as config from './config.js';
+import * as UAParserLib from 'ua-parser-js';
 
 // Define the main worker object (ES Module format)
 export default {
@@ -65,7 +66,7 @@ async function handleRequest(request, env, ctx) {
     
     if (!segments) {
       console.log(`[CACHE] Cache miss, fetching from API`);
-      segments = await getSegmentsFromAPI(url, etag, lastModified, env);
+      segments = await getSegmentsFromAPI(url, etag, lastModified, env, request);
       // Only cache if we got valid segments
       if (segments && segments.length > 0) {
         // Use context.waitUntil to not block the response
@@ -93,14 +94,126 @@ async function handleRequest(request, env, ctx) {
   }
 }
 
-async function getSegmentsFromAPI(url, etag, last_modified, env) {
+async function getSegmentsFromAPI(url, etag, last_modified, env, request) {
     // Make Scope3 API request with timeout
     const apiKey = env.SCOPE3_API_KEY || config.TEST_API_KEY;
-    const scope3req = {
-      etag: etag,
-      last_modified: last_modified,
-      url: url.toString()
+    
+    // Extract domain from the URL
+    const domain = url.hostname;
+    
+    // Get user agent string from request headers
+    const userAgentString = request?.headers?.get("user-agent") || "";
+    
+    // Parse user agent with UAParser
+    const parser = new UAParserLib.UAParser(userAgentString);
+    const result = parser.getResult();
+    
+    // Determine device type from parsing result (1=mobile, 2=desktop, 3=connected TV, 4=phone, 5=tablet, 6=connected device, 7=set top box)
+    let devicetype = 2; // Default to desktop
+    if (result.device.type === 'mobile' || result.device.type === 'tablet') {
+      devicetype = result.device.type === 'mobile' ? 1 : 5;
     }
+    
+    // Get geolocation data from CF data with defaults
+    let country = "US"; // Default country
+    let region = "";
+    let city = "";
+    let postalCode = "";
+    let latitude = null;
+    let longitude = null;
+    let timezone = "";
+    
+    if (request && request.cf) {
+      // Get country from CF data
+      if (request.cf.country) {
+        country = request.cf.country;
+      }
+      
+      // Get region from CF data
+      if (request.cf.region) {
+        region = request.cf.region;
+      }
+      
+      // Get city from CF data
+      if (request.cf.city) {
+        city = request.cf.city;
+      }
+      
+      // Get postal code from CF data
+      if (request.cf.postalCode) {
+        postalCode = request.cf.postalCode;
+      }
+      
+      // Get coordinates from CF data
+      if (request.cf.latitude !== undefined) {
+        // Ensure latitude is a number
+        latitude = typeof request.cf.latitude === 'number' ? 
+                  request.cf.latitude : 
+                  parseFloat(request.cf.latitude);
+      }
+      if (request.cf.longitude !== undefined) {
+        // Ensure longitude is a number
+        longitude = typeof request.cf.longitude === 'number' ? 
+                   request.cf.longitude : 
+                   parseFloat(request.cf.longitude);
+      }
+      
+      // Get timezone from CF data
+      if (request.cf.timezone) {
+        timezone = request.cf.timezone;
+      }
+    }
+    
+    // Check for CF-Device-Type header
+    const cfDeviceType = request?.headers?.get("CF-Device-Type");
+    if (cfDeviceType) {
+      // Override devicetype based on CF-Device-Type header
+      if (cfDeviceType === "mobile") {
+        devicetype = 1;
+      } else if (cfDeviceType === "tablet") {
+        devicetype = 5;
+      } else if (cfDeviceType === "desktop") {
+        devicetype = 2;
+      }
+    }
+    
+    // Create OpenRTB request format
+    const openRtbRequest = {
+      site: {
+        domain: domain,
+        page: url.toString(),
+        ext: {
+          scope3: {
+            etag: etag || "",
+            last_modified: last_modified || ""
+          }
+        }
+      },
+      imp: [
+        {
+          id: "1"
+        }
+      ],
+      device: {
+        devicetype: devicetype,
+        geo: {
+          country: country
+        },
+        ua: userAgentString,
+        os: result.os.name,
+        make: result.device.vendor || "",
+        model: result.device.model || ""
+      }
+    };
+    
+    // Add optional geo fields only if they have valid values
+    if (region) openRtbRequest.device.geo.region = region;
+    if (city) openRtbRequest.device.geo.city = city;
+    if (postalCode) openRtbRequest.device.geo.zip = postalCode;
+    if (latitude !== null && !isNaN(latitude)) openRtbRequest.device.geo.lat = latitude;
+    if (longitude !== null && !isNaN(longitude)) openRtbRequest.device.geo.lon = longitude;
+    if (timezone) openRtbRequest.device.geo.utcoffset = timezone;
+    
     try {
       const apiStartTime = Date.now();
       
@@ -109,33 +222,79 @@ async function getSegmentsFromAPI(url, etag, last_modified, env) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), apiTimeout);
       
+      console.log(`[API] Sending OpenRTB request:`, JSON.stringify(openRtbRequest, null, 2));
+      
       const response = await fetch(config.SCOPE3_API_ENDPOINT, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'x-scope3-auth': `${apiKey}`
         },
-        body: JSON.stringify(scope3req),
+        body: JSON.stringify(openRtbRequest),
         signal: controller.signal
       });
       
       clearTimeout(timeoutId);
-      const data = await response.json();
       const apiTime = Date.now() - apiStartTime;
       console.log(`[TIMING] Scope3 API call took ${apiTime}ms`);
       
-      console.log(`[API] Scope3 API response:`, JSON.stringify(data, null, 2))
-      const kvs = data?.url_classifications?.key_vals || [];
-      const segments = kvs.length > 0 ? kvs[0].values : [];
+      // The response is valid if it's 200 OK, no need to check if (!response.ok)
       
-      // Log segments in a readable format
-      console.log(`[SEGMENTS] Found ${segments.length} segments:`, JSON.stringify(segments, null, 2));
+      // Get the response text and try to parse it as JSON
+      const responseText = await response.text();
       
-      // No longer caching here since we're doing it in handleRequest
-      return segments
+      // Try to parse the JSON response
+      let data;
+      try {
+        data = JSON.parse(responseText);
+        console.log(`[API] Scope3 API response:`, JSON.stringify(data, null, 2));
+      } catch (parseError) {
+        console.error(`[API] JSON parse error: ${parseError.message}`);
+        console.log(`[API] Response body: ${responseText}`);
+        return [];
+      }
+      
+      // Handle the new response format - this will need to be adjusted based on the actual response
+      let segments = [];
+      
+      // Create structured segments object
+      // TODO: Add global segments when supported by the API
+      const structuredSegments = {
+        global: [] // Empty global segments for now
+      };
+      
+      // Parse slot-specific segments from impressions
+      if (data && data.data && Array.isArray(data.data)) {
+        // Process each destination in the response
+        data.data.forEach(destination => {
+          // Check for imp array
+          if (destination.imp && Array.isArray(destination.imp)) {
+            // Process each impression
+            destination.imp.forEach(impression => {
+              // Extract segments if available
+              if (impression.ext && impression.ext.scope3 && impression.ext.scope3.segments) {
+                const impSegments = impression.ext.scope3.segments.map(segment => segment.id);
+                
+                // Add to slot-specific collection using tagid or imp.id as fallback
+                const slotId = impression.tagid || impression.id;
+                if (slotId) {
+                  structuredSegments[slotId] = impSegments;
+                }
+              }
+            });
+          }
+        });
+      }
+      
+      // Log structured segments
+      console.log(`[SEGMENTS] Structured segments:`, JSON.stringify(structuredSegments, null, 2));
+      
+      // Return the structured segments object
+      return structuredSegments;
     } catch (error) {
       console.error(`[API] Error getting segments: ${error}`);
-      return [];
+      // Return empty structured segments object
+      return { global: [] };
     }
 }
 
@@ -181,8 +340,19 @@ async function getCachedSegments(cacheKey, env) {
     }
     
     console.log(`[CACHE] Found cached segments for key: ${cacheKey}`);
-    console.log(`[SEGMENTS] Found ${cachedData.segments.length} cached segments:`, JSON.stringify(cachedData.segments, null, 2));
-    return cachedData.segments;
+    
+    // Handle both new structured format and legacy format
+    if (cachedData.structuredSegments) {
+      console.log(`[SEGMENTS] Found cached structured segments:`, JSON.stringify(cachedData.structuredSegments, null, 2));
+      return cachedData.structuredSegments;
+    } else if (cachedData.segments) {
+      // Legacy format - convert to structured format
+      console.log(`[SEGMENTS] Found ${cachedData.segments.length} cached segments (legacy format):`, JSON.stringify(cachedData.segments, null, 2));
+      return { global: cachedData.segments };
+    }
+    
+    // No valid segments found
+    return null;
   } catch (error) {
     console.error(`[CACHE] Error checking cache: ${error}`);
     return null;
@@ -198,12 +368,12 @@ async function getCachedSegments(cacheKey, env) {
  * @param {Object} env - Environment variables and bindings
  * @returns {Promise<void>}
  */
-async function cacheSegments(url, etag, last_modified, segments, env) {
+async function cacheSegments(url, etag, last_modified, structuredSegments, env) {
   const cacheKey = getCacheKey(url, etag, last_modified);
   try {
-    // Create the cache entry
+    // Create the cache entry with structured segments
     const cacheData = {
-      segments: segments,
+      structuredSegments: structuredSegments,
       timestamp: Date.now()
     };
     
@@ -230,7 +400,7 @@ async function cacheSegments(url, etag, last_modified, segments, env) {
     
     const cacheWriteTime = Date.now() - cacheWriteStartTime;
     console.log(`[TIMING] Cache API write took ${cacheWriteTime}ms`);
-    console.log(`[CACHE] Cached segments for key: ${cacheKey} with TTL of ${cacheTtl}s`);
+    console.log(`[CACHE] Cached structured segments for key: ${cacheKey} with TTL of ${cacheTtl}s`);
   } catch (error) {
     console.error(`[CACHE] Error caching segments: ${error}`);
   }
@@ -268,11 +438,11 @@ function injectIntoHead(html, scriptToInject) {
  * @param {Array} segments - The segments to inject
  * @returns {string} - The modified HTML
  */
-function insertScope3Segments(html, baseUrl, segments) {
-  // Create the script to be injected
+function insertScope3Segments(html, baseUrl, structuredSegments) {
+  // Create the script to be injected with structured segments format
   var scriptToInject = `<script>
   window.scope3 = window.scope3 || {};
-  window.scope3.segments = ${JSON.stringify(segments || [])};
+  window.scope3.segments = ${JSON.stringify(structuredSegments || { global: [] })};
 </script>`;
   if (baseUrl) {
     scriptToInject += `<base href=${baseUrl}/>`

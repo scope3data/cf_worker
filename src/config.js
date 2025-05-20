@@ -5,7 +5,7 @@
  */
 
 // API Configuration
-export const SCOPE3_API_ENDPOINT = 'https://rtdp.scope3.com/publishers/qa';
+export const SCOPE3_API_ENDPOINT = 'https://rtdp.scope3.com/amazonaps/rtii';
 export const DEFAULT_CACHE_TTL = 60 * 60; // Cache for 1 hour (in seconds)
 export const DEFAULT_API_TIMEOUT = 1000; // Timeout after 1000ms (1 second)
 
