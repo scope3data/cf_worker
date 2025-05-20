@@ -59,18 +59,23 @@ async function handleRequest(request, env, ctx) {
     
     const etag = response.headers.get('ETag');
     const lastModified = response.headers.get('Last-Modified');
-    const segmentsCacheKey = getCacheKey(url, etag, lastModified);
+    
+    // Build the API request object that we'll send to Scope3
+    const apiRequest = buildOpenRtbRequest(url, etag, lastModified, request);
+    
+    // Use the API request as the cache key (stringified and hashed)
+    const cacheKey = getCacheKey(apiRequest);
     
     // Get segments from cache
-    let segments = await getCachedSegments(segmentsCacheKey, env);
+    let segments = await getCachedSegments(cacheKey, env);
     
     if (!segments) {
       console.log(`[CACHE] Cache miss, fetching from API`);
-      segments = await getSegmentsFromAPI(url, etag, lastModified, env, request);
+      segments = await callSegmentApi(apiRequest, env);
       // Only cache if we got valid segments
-      if (segments && segments.length > 0) {
+      if (segments && Object.keys(segments).length > 0) {
         // Use context.waitUntil to not block the response
-        ctx.waitUntil(cacheSegments(url, etag, lastModified, segments, env));
+        ctx.waitUntil(cacheSegments(cacheKey, segments, env));
       }
     }
 
@@ -91,6 +96,93 @@ async function handleRequest(request, env, ctx) {
       status: 500,
       headers: { 'Content-Type': 'text/plain' }
     });
+  }
+}
+
+/**
+ * Call the Scope3 API with an OpenRTB request to get segments
+ * @param {Object} apiRequest - The OpenRTB request object
+ * @param {Object} env - Environment variables and bindings
+ * @returns {Promise<Object>} - The structured segments from the API
+ */
+async function callSegmentApi(apiRequest, env) {
+  try {
+    const apiStartTime = Date.now();
+    const apiKey = env.SCOPE3_API_KEY || config.TEST_API_KEY;
+    
+    // Set up timeout using AbortController
+    const apiTimeout = parseInt(env.API_TIMEOUT || config.DEFAULT_API_TIMEOUT);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), apiTimeout);
+    
+    console.log(`[API] Sending OpenRTB request:`, JSON.stringify(apiRequest, null, 2));
+    
+    const response = await fetch(config.SCOPE3_API_ENDPOINT, {
+      method: 'POST',
+      headers: {
+          'Content-Type': 'application/json',
+          'x-scope3-auth': `${apiKey}`
+      },
+      body: JSON.stringify(apiRequest),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    const apiTime = Date.now() - apiStartTime;
+    console.log(`[TIMING] Scope3 API call took ${apiTime}ms`);
+    
+    // Get the response text and try to parse it as JSON
+    const responseText = await response.text();
+    
+    // Try to parse the JSON response
+    let data;
+    try {
+      data = JSON.parse(responseText);
+      console.log(`[API] Scope3 API response:`, JSON.stringify(data, null, 2));
+    } catch (parseError) {
+      console.error(`[API] JSON parse error: ${parseError.message}`);
+      console.log(`[API] Response body: ${responseText}`);
+      return { global: [] };
+    }
+    
+    // Handle the new response format - this will need to be adjusted based on the actual response
+    // Create structured segments object
+    const structuredSegments = {
+      global: [] // Empty global segments for now
+    };
+    
+    // Parse slot-specific segments from impressions
+    if (data && data.data && Array.isArray(data.data)) {
+      // Process each destination in the response
+      data.data.forEach(destination => {
+        // Check for imp array
+        if (destination.imp && Array.isArray(destination.imp)) {
+          // Process each impression
+          destination.imp.forEach(impression => {
+            // Extract segments if available
+            if (impression.ext && impression.ext.scope3 && impression.ext.scope3.segments) {
+              const impSegments = impression.ext.scope3.segments.map(segment => segment.id);
+              
+              // Add to slot-specific collection using tagid or imp.id as fallback
+              const slotId = impression.tagid || impression.id;
+              if (slotId) {
+                structuredSegments[slotId] = impSegments;
+              }
+            }
+          });
+        }
+      });
+    }
+    
+    // Log structured segments
+    console.log(`[SEGMENTS] Structured segments:`, JSON.stringify(structuredSegments, null, 2));
+    
+    // Return the structured segments object
+    return structuredSegments;
+  } catch (error) {
+    console.error(`[API] Error getting segments: ${error}`);
+    // Return empty structured segments object
+    return { global: [] };
   }
 }
 
@@ -368,8 +460,7 @@ async function getCachedSegments(cacheKey, env) {
  * @param {Object} env - Environment variables and bindings
  * @returns {Promise<void>}
  */
-async function cacheSegments(url, etag, last_modified, structuredSegments, env) {
-  const cacheKey = getCacheKey(url, etag, last_modified);
+async function cacheSegments(cacheKey, structuredSegments, env) {
   try {
     // Create the cache entry with structured segments
     const cacheData = {
@@ -406,14 +497,158 @@ async function cacheSegments(url, etag, last_modified, structuredSegments, env) 
   }
 }
 
-function getCacheKey(url, etag, lastModified) {
-  var segmentsCacheKey = `url:${url.toString()}`
-  if (etag) {
-    segmentsCacheKey += `,etag:${etag}`
-  } else if (lastModified) {
-    segmentsCacheKey += `,last:${lastModified}`
+/**
+ * Build an OpenRTB request object for the Scope3 API
+ * @param {URL} url - The URL of the page
+ * @param {string} etag - The ETag header from the response
+ * @param {string} lastModified - The Last-Modified header from the response
+ * @param {Request} request - The original request with headers and CF data
+ * @returns {Object} - The OpenRTB request object
+ */
+function buildOpenRtbRequest(url, etag, lastModified, request) {
+  // Extract domain from the URL
+  const domain = url.hostname;
+  
+  // Get user agent string from request headers
+  const userAgentString = request?.headers?.get("user-agent") || "";
+  
+  // Parse user agent with UAParser
+  const parser = new UAParserLib.UAParser(userAgentString);
+  const result = parser.getResult();
+  
+  // Determine device type from parsing result (1=mobile, 2=desktop, 3=connected TV, 4=phone, 5=tablet, 6=connected device, 7=set top box)
+  let devicetype = 2; // Default to desktop
+  if (result.device.type === 'mobile' || result.device.type === 'tablet') {
+    devicetype = result.device.type === 'mobile' ? 1 : 5;
   }
-  return segmentsCacheKey
+  
+  // Get geolocation data from CF data with defaults
+  let country = "US"; // Default country
+  let region = "";
+  let city = "";
+  let postalCode = "";
+  let latitude = null;
+  let longitude = null;
+  let timezone = "";
+  
+  if (request && request.cf) {
+    // Get country from CF data
+    if (request.cf.country) {
+      country = request.cf.country;
+    }
+    
+    // Get region from CF data
+    if (request.cf.region) {
+      region = request.cf.region;
+    }
+    
+    // Get city from CF data
+    if (request.cf.city) {
+      city = request.cf.city;
+    }
+    
+    // Get postal code from CF data
+    if (request.cf.postalCode) {
+      postalCode = request.cf.postalCode;
+    }
+    
+    // Get coordinates from CF data
+    if (request.cf.latitude !== undefined) {
+      // Ensure latitude is a number
+      latitude = typeof request.cf.latitude === 'number' ? 
+                request.cf.latitude : 
+                parseFloat(request.cf.latitude);
+    }
+    if (request.cf.longitude !== undefined) {
+      // Ensure longitude is a number
+      longitude = typeof request.cf.longitude === 'number' ? 
+                 request.cf.longitude : 
+                 parseFloat(request.cf.longitude);
+    }
+    
+    // Get timezone from CF data
+    if (request.cf.timezone) {
+      timezone = request.cf.timezone;
+    }
+  }
+  
+  // Check for CF-Device-Type header
+  const cfDeviceType = request?.headers?.get("CF-Device-Type");
+  if (cfDeviceType) {
+    // Override devicetype based on CF-Device-Type header
+    if (cfDeviceType === "mobile") {
+      devicetype = 1;
+    } else if (cfDeviceType === "tablet") {
+      devicetype = 5;
+    } else if (cfDeviceType === "desktop") {
+      devicetype = 2;
+    }
+  }
+  
+  // Create OpenRTB request format
+  const openRtbRequest = {
+    site: {
+      domain: domain,
+      page: url.toString(),
+      ext: {
+        scope3: {
+          etag: etag || "",
+          last_modified: lastModified || ""
+        }
+      }
+    },
+    imp: [
+      {
+        id: "1"
+      }
+    ],
+    device: {
+      devicetype: devicetype,
+      geo: {
+        country: country
+      },
+      ua: userAgentString,
+      os: result.os.name,
+      make: result.device.vendor || "",
+      model: result.device.model || ""
+    }
+  };
+  
+  // Add optional geo fields only if they have valid values
+  if (region) openRtbRequest.device.geo.region = region;
+  if (city) openRtbRequest.device.geo.city = city;
+  if (postalCode) openRtbRequest.device.geo.zip = postalCode;
+  if (latitude !== null && !isNaN(latitude)) openRtbRequest.device.geo.lat = latitude;
+  if (longitude !== null && !isNaN(longitude)) openRtbRequest.device.geo.lon = longitude;
+  if (timezone) openRtbRequest.device.geo.utcoffset = timezone;
+  
+  return openRtbRequest;
+}
+
+/**
+ * Generate a cache key from the API request
+ * @param {Object} apiRequest - The OpenRTB request object
+ * @returns {string} - The cache key
+ */
+function getCacheKey(apiRequest) {
+  // Simple hash function for strings
+  function simpleHash(str) {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return Math.abs(hash).toString(16);
+  }
+  
+  // Create a deterministic cache key based on a hash of the request
+  const requestStr = JSON.stringify(apiRequest);
+  const requestHash = simpleHash(requestStr);
+  
+  // Use the Scope3 API domain as part of the key
+  const apiUrl = new URL(config.SCOPE3_API_ENDPOINT);
+  return `${apiUrl.hostname}:${requestHash}`;
 }
 
 function injectIntoHead(html, scriptToInject) {

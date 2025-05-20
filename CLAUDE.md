@@ -53,8 +53,12 @@ node test/segment-tests.js
 - **Error Handling**: Gracefully handle invalid URLs and connection failures
 
 ### Segment Generation
-- **API Integration**: Call Scope3 API to get contextual segments
-- **Content Extraction**: Parse HTML to extract page content
+- **API Integration**: Call Scope3 API using OpenRTB format to get contextual segments
+- **OpenRTB Request**: Build OpenRTB-compliant request objects that include:
+  - Site information (domain, page URL)
+  - Page metadata (etag, last-modified)
+  - Device information (type, OS, user agent)
+  - Geo information (country, region, coordinates)
 - **Fallback Generation**: Provide mock segments when API key is missing or API call fails
 - **Special Case Handling**: Support predefined segments for specific domains
 - **Caching**: Cache results to avoid repeated API calls
@@ -78,7 +82,7 @@ The worker uses a multi-layered approach:
 
 - **Cache System**: Using Cloudflare KV, segments are cached with a configurable TTL
 - **Timeout Mechanism**: API calls are limited to a configurable timeout (default 1000ms)
-- **Content Extraction**: Extracts relevant content from pages to send to Scope3 API
+- **OpenRTB Request Builder**: Creates standardized OpenRTB request objects for the Scope3 API
 - **Segment Injection**: Adds segments to the page as a JavaScript variable
 - **URL Proxy Service**: Fetches and modifies external content
 
@@ -92,22 +96,108 @@ The following can be configured:
 
 ## Testing
 
-The project includes two test suites:
+### Running Tests
 
-1. **Proxy Tests**: Verifies URL handling and proxying functionality
+```bash
+# Run all tests
+node test/run-test.js
+
+# Run specific unit tests
+node test/index-test.js
+node test/open-rtb-test.js
+```
+
+The project includes several test suites:
+
+1. **Comprehensive Tests**: Full test suite that validates all worker functionality
+   - Tests URL handling and proxying
+   - Tests segment generation and injection
+   - Tests OpenRTB request generation and API integration
+
+2. **OpenRTB Tests**: Specific tests for the OpenRTB request format
+   - Validates the structure and content of OpenRTB requests
+   - Verifies correct handling of device information
+   - Ensures proper geo data handling
+   - Tests request variations (different device types, browsers, etc.)
+
+3. **Integration Tests**: Verifies end-to-end functionality
    - Tests for various URL formats (HTTP, HTTPS, protocol-relative)
-   - Tests for query parameter preservation
-   - Tests for error handling
+   - Tests for segment inclusion and formatting
+   - Tests for error handling and timeouts
 
-2. **Segment Tests**: Verifies segment generation functionality
-   - Tests for segments on different site types
-   - Tests for special domain handling (e.g., people.com)
-   - Tests for API integration
+## API Integration
+
+### OpenRTB Request Format
+
+The worker uses the OpenRTB format to communicate with the Scope3 API. The main structure includes:
+
+```javascript
+{
+  "site": {
+    "domain": "example.com",
+    "page": "https://example.com/article",
+    "ext": {
+      "scope3": {
+        "etag": "W/\"12345\"",
+        "last_modified": "Wed, 21 Oct 2023 07:28:00 GMT"
+      }
+    }
+  },
+  "imp": [
+    {
+      "id": "1"
+    }
+  ],
+  "device": {
+    "devicetype": 2, // 1=mobile, 2=desktop, 5=tablet
+    "geo": {
+      "country": "US",
+      "region": "CA",
+      "city": "San Francisco",
+      "zip": "94107",
+      "lat": 37.7749,
+      "lon": -122.4194,
+      "utcoffset": "America/Los_Angeles"
+    },
+    "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36...",
+    "os": "Windows",
+    "make": "Google",
+    "model": "Chrome"
+  }
+}
+```
+
+### API Response Processing
+
+The API responds with segment data that is processed and structured as:
+
+```javascript
+{
+  "global": [], // Global segments
+  "1": ["segment1", "segment2"] // Slot-specific segments
+}
+```
+
+This structure is then injected into the page as `window.scope3.segments`.
+
+## Cache System
+
+The caching system uses a hash of the OpenRTB request as the cache key:
+
+```javascript
+const cacheKey = `${apiHost}:${requestHash}`;
+```
+
+This ensures that:
+- Similar requests get the same cached response
+- Changes in page content (via etags) trigger new API calls
+- The cache is properly scoped to the API endpoint being used
 
 ## Best Practices
 
-- Keep the content extraction lightweight to avoid page load delays
-- Adjust the API timeout based on your performance requirements
-- Monitor cache hit rates and adjust TTL as needed
+- Adjust the API timeout based on your performance requirements (default 1000ms)
+- Monitor cache hit rates and adjust TTL as needed (default 1 hour)
 - Run tests before deployment to ensure all functionality works correctly
+- Implement proper error handling for API failures
+- Use the Cloudflare Cache API effectively to reduce API calls
 - Rewrite URLs to avoid proxying resources for better performance
