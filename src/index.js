@@ -466,6 +466,12 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
     console.log(`[ID] Found LiveRamp envelope but source is not verified (_lr_env_src_ats = ${lrEnvSource}), skipping`);
   }
   
+  // Check for UID2 token (Unified ID 2.0)
+  const uid2Token = cookies['__uid2_advertising_token'] || cookies['uid2'] || null;
+  if (uid2Token) {
+    console.log(`[ID] Found UID2 token: ${uid2Token.substring(0, 10)}...`);
+  }
+  
   // Create OpenRTB request format
   const openRtbRequest = {
     site: {
@@ -519,6 +525,16 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
       source: "liveramp.com",
       uids: [{
         id: lrEnvParsed.envelope
+      }]
+    });
+  }
+  
+  // Add UID2 token to eids if available
+  if (uid2Token) {
+    openRtbRequest.user.ext.eids.push({
+      source: "uidapi.com",
+      uids: [{
+        id: uid2Token
       }]
     });
   }
