@@ -15,9 +15,10 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.50.4",
+    "crypto-js": "^4.2.0",
     "ua-parser-js": "^2.0.0"
   },
   "devDependencies": {
-    "wrangler": "^4.15.2"
+    "wrangler": "^4.16.0"
   }
 }

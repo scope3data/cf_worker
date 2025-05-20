@@ -8,6 +8,8 @@
 // Import configuration and simplified caching modules (ES module format)
 import * as config from './config.js';
 import * as UAParserLib from 'ua-parser-js';
+import SHA256 from 'crypto-js/sha256.js';
+import Hex from 'crypto-js/enc-hex.js';
 
 // Define the main worker object (ES Module format)
 export default {
@@ -443,20 +445,29 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
  * @returns {string} - The cache key
  */
 function getCacheKey(apiRequest) {
-  // Simple hash function for strings
-  function simpleHash(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+  // Create a normalized request object for consistent hashing
+  const requestCopy = JSON.parse(JSON.stringify(apiRequest));
+  
+  // Normalize or remove fields that shouldn't affect caching
+  if (requestCopy.device) {
+    // UA string contains too many variations, normalize to browser/OS/device type
+    if (requestCopy.device.ua) {
+      const parser = new UAParserLib.UAParser(requestCopy.device.ua);
+      const result = parser.getResult();
+      // Replace detailed UA string with normalized version
+      requestCopy.device.ua_normalized = {
+        browser: result.browser.name,
+        os: result.os.name,
+        device: requestCopy.device.devicetype
+      };
+      delete requestCopy.device.ua;
     }
-    return Math.abs(hash).toString(16);
   }
   
-  // Create a deterministic cache key based on a hash of the request
-  const requestStr = JSON.stringify(apiRequest);
-  const requestHash = simpleHash(requestStr);
+  // Create a deterministic cache key based on a SHA-256 hash of the normalized request
+  const requestStr = JSON.stringify(requestCopy);
+  // Use SHA-256 for better distribution and collision resistance
+  const requestHash = SHA256(requestStr).toString(Hex).substring(0, 16);
   
   // Use the Scope3 API domain as part of the key
   const apiUrl = new URL(config.SCOPE3_API_ENDPOINT);
