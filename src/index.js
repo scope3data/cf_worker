@@ -202,6 +202,28 @@ async function callSegmentApi(apiRequest, env) {
   }
 }
 
+/**
+ * Parse cookies from a request and return them as an object
+ * @param {Request} request - The request object
+ * @returns {Object} - An object with cookie names as keys and values as values
+ */
+function parseCookies(request) {
+  const cookieString = request?.headers?.get('cookie') || '';
+  const cookiePairs = cookieString.split(';');
+  const cookies = {};
+  
+  for (let cookiePair of cookiePairs) {
+    const cookieSegments = cookiePair.trim().split('=');
+    if (cookieSegments.length >= 2) {
+      const name = decodeURIComponent(cookieSegments[0]);
+      const value = decodeURIComponent(cookieSegments.slice(1).join('='));
+      cookies[name] = value;
+    }
+  }
+  
+  return cookies;
+}
+
 // This function has been removed as it duplicates the functionality of callSegmentApi
 
 /**
@@ -399,6 +421,45 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
     }
   }
   
+  // Extract IDs from cookies
+  const cookies = parseCookies(request);
+  
+  // Check for Prebid SharedID (usually in cookie named '_sharedid')
+  const sharedId = cookies['_sharedid'] || null;
+  let sharedIdParsed = null;
+  
+  if (sharedId) {
+    try {
+      // SharedID is usually stored as JSON
+      sharedIdParsed = JSON.parse(sharedId);
+      console.log(`[ID] Found SharedID: ${JSON.stringify(sharedIdParsed)}`);
+    } catch (e) {
+      console.log(`[ID] Found SharedID but couldn't parse: ${sharedId}`);
+    }
+  }
+  
+  // Check for LiveRamp ATS ID (usually in cookie named '_lr_env')
+  const lrEnv = cookies['_lr_env'] || null;
+  let lrEnvParsed = null;
+  
+  if (lrEnv) {
+    try {
+      // LiveRamp envelope might be stored as base64 or JSON
+      if (lrEnv.includes('{')) {
+        lrEnvParsed = JSON.parse(lrEnv);
+      } else {
+        // Might be base64 encoded - attempt to decode
+        const decoded = atob(lrEnv);
+        if (decoded.includes('{')) {
+          lrEnvParsed = JSON.parse(decoded);
+        }
+      }
+      console.log(`[ID] Found LiveRamp ATS envelope: ${JSON.stringify(lrEnvParsed)}`);
+    } catch (e) {
+      console.log(`[ID] Found LiveRamp envelope but couldn't parse: ${lrEnv}`);
+    }
+  }
+  
   // Create OpenRTB request format
   const openRtbRequest = {
     site: {
@@ -425,8 +486,41 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
       os: result.os.name,
       make: result.device.vendor || "",
       model: result.device.model || ""
+    },
+    user: {
+      ext: {
+        eids: []
+      }
     }
   };
+  
+  // Add SharedID to eids if available
+  if (sharedIdParsed && sharedIdParsed.id) {
+    openRtbRequest.user.ext.eids.push({
+      source: "sharedid.org",
+      uids: [{
+        id: sharedIdParsed.id,
+        ext: {
+          third: sharedIdParsed.third || 0
+        }
+      }]
+    });
+  }
+  
+  // Add LiveRamp ATS ID to eids if available
+  if (lrEnvParsed && lrEnvParsed.envelope) {
+    openRtbRequest.user.ext.eids.push({
+      source: "liveramp.com",
+      uids: [{
+        id: lrEnvParsed.envelope
+      }]
+    });
+  }
+  
+  // Only include user object if we have IDs
+  if (openRtbRequest.user.ext.eids.length === 0) {
+    delete openRtbRequest.user;
+  }
   
   // Add optional geo fields only if they have valid values
   if (region) openRtbRequest.device.geo.region = region;
@@ -463,6 +557,26 @@ function getCacheKey(apiRequest) {
       delete requestCopy.device.ua;
     }
   }
+  
+  // Extract just the user IDs for cache key - we want different caches per user ID
+  const userIds = [];
+  if (requestCopy.user && requestCopy.user.ext && requestCopy.user.ext.eids) {
+    // Keep only the IDs, not the full structure, to simplify the cache key
+    requestCopy.user.ext.eids.forEach(eid => {
+      if (eid.uids && eid.uids.length > 0) {
+        userIds.push({
+          source: eid.source,
+          id: eid.uids[0].id
+        });
+      }
+    });
+  }
+  
+  // Replace full user object with just the essential IDs
+  if (userIds.length > 0) {
+    requestCopy.user_ids = userIds;
+  }
+  delete requestCopy.user;
   
   // Create a deterministic cache key based on a SHA-256 hash of the normalized request
   const requestStr = JSON.stringify(requestCopy);
