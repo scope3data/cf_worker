@@ -442,7 +442,11 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
   const lrEnv = cookies['_lr_env'] || null;
   let lrEnvParsed = null;
   
-  if (lrEnv) {
+  // Check for LiveRamp envelope source flag
+  const lrEnvSource = cookies['_lr_env_src_ats'] || null;
+  const isValidAtsSource = lrEnvSource === 'true';
+  
+  if (lrEnv && isValidAtsSource) {
     try {
       // LiveRamp envelope might be stored as base64 or JSON
       if (lrEnv.includes('{')) {
@@ -454,10 +458,12 @@ function buildOpenRtbRequest(url, etag, lastModified, request) {
           lrEnvParsed = JSON.parse(decoded);
         }
       }
-      console.log(`[ID] Found LiveRamp ATS envelope: ${JSON.stringify(lrEnvParsed)}`);
+      console.log(`[ID] Found verified LiveRamp ATS envelope: ${JSON.stringify(lrEnvParsed)}`);
     } catch (e) {
       console.log(`[ID] Found LiveRamp envelope but couldn't parse: ${lrEnv}`);
     }
+  } else if (lrEnv) {
+    console.log(`[ID] Found LiveRamp envelope but source is not verified (_lr_env_src_ats = ${lrEnvSource}), skipping`);
   }
   
   // Create OpenRTB request format
